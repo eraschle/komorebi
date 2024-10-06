@@ -14,7 +14,6 @@ mod widget;
 use crate::bar::Komobar;
 use crate::config::KomobarConfig;
 use crate::config::Position;
-use atomic_float::AtomicF32;
 use clap::Parser;
 use color_eyre::eyre::bail;
 use eframe::egui::ViewportBuilder;
@@ -27,17 +26,21 @@ use std::io::BufReader;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicI32;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
+use windows::Win32::Foundation::BOOL;
+use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::LPARAM;
+use windows::Win32::System::Threading::GetCurrentProcessId;
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext;
 use windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
+use windows::Win32::UI::WindowsAndMessaging::EnumThreadWindows;
+use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 
 pub static WIDGET_SPACING: f32 = 10.0;
 pub static MAX_LABEL_WIDTH: AtomicI32 = AtomicI32::new(400);
-pub static DPI: AtomicF32 = AtomicF32::new(1.0);
-
 #[derive(Parser)]
 #[clap(author, about, version)]
 struct Opts {
@@ -83,6 +86,37 @@ pub fn dpi_for_monitor(hmonitor: isize) -> color_eyre::Result<f32> {
 
     #[allow(clippy::cast_precision_loss)]
     Ok(dpi_y as f32 / 96.0)
+}
+
+extern "system" fn enum_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    unsafe {
+        let mut process_id = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+
+        if process_id == GetCurrentProcessId() {
+            *(lparam.0 as *mut HWND) = hwnd;
+            BOOL::from(false) // Stop enumeration
+        } else {
+            BOOL::from(true) // Continue enumeration
+        }
+    }
+}
+
+fn process_hwnd() -> Option<isize> {
+    unsafe {
+        let mut hwnd = HWND::default();
+        let _ = EnumThreadWindows(
+            GetCurrentThreadId(),
+            Some(enum_window),
+            LPARAM(&mut hwnd as *mut HWND as isize),
+        );
+
+        if hwnd.0 as isize == 0 {
+            None
+        } else {
+            Some(hwnd.0 as isize)
+        }
+    }
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -196,7 +230,6 @@ fn main() -> color_eyre::Result<()> {
     )?)?;
 
     let dpi = dpi_for_monitor(state.monitors.elements()[config.monitor.index].id())?;
-    DPI.store(dpi, Ordering::SeqCst);
 
     let mut viewport_builder = ViewportBuilder::default()
         .with_decorations(false)
@@ -213,22 +246,17 @@ fn main() -> color_eyre::Result<()> {
             }
         });
 
-    if let Some(viewport) = &config.viewport {
-        if let Some(mut position) = &viewport.position {
-            position.x /= dpi;
-            position.y /= dpi;
+    if let Some(position) = &config.position {
+        let mut start = position.start;
+        start.x /= dpi;
+        start.y /= dpi;
 
-            let b = viewport_builder.clone();
-            viewport_builder = b.with_position(position);
-        }
+        let mut end = position.end;
+        end.x /= dpi;
+        end.y /= dpi;
 
-        if let Some(mut inner_size) = &viewport.inner_size {
-            inner_size.x /= dpi;
-            inner_size.y /= dpi;
-
-            let b = viewport_builder.clone();
-            viewport_builder = b.with_inner_size(inner_size);
-        }
+        let b = viewport_builder.clone();
+        viewport_builder = b.with_position(start).with_inner_size(end);
     }
 
     let native_options = eframe::NativeOptions {

@@ -12,8 +12,9 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 /// The `komorebi.bar.json` configuration file reference for `v0.1.30`
 pub struct KomobarConfig {
-    /// Viewport options (see: https://docs.rs/egui/latest/egui/viewport/struct.ViewportBuilder.html)
-    pub viewport: Option<ViewportConfig>,
+    /// Bar positioning options
+    #[serde(alias = "viewport")]
+    pub position: Option<PositionConfig>,
     /// Frame options (see: https://docs.rs/egui/latest/egui/containers/struct.Frame.html)
     pub frame: Option<FrameConfig>,
     /// Monitor options
@@ -33,11 +34,13 @@ pub struct KomobarConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct ViewportConfig {
+pub struct PositionConfig {
     /// The desired starting position of the bar (0,0 = top left of the screen)
-    pub position: Option<Position>,
+    #[serde(alias = "position")]
+    pub start: Position,
     /// The desired size of the bar from the starting position (usually monitor width x desired height)
-    pub inner_size: Option<Position>,
+    #[serde(alias = "inner_size")]
+    pub end: Position,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
